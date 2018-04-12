@@ -1,3 +1,4 @@
+#if 1
 /*
  * Copyright (c) 2015-2017, Texas Instruments Incorporated
  * All rights reserved.
@@ -63,6 +64,13 @@
 static Display_Handle display;
 
 #define TMP006_DIE_TEMP     0x0001  /* Die Temp Result Register */
+#define TMP006_DIE_TEMP_2     0x0002  /* Die Temp Result Register */
+
+#define PAD_CONFIG_BASE     ((OCP_SHARED_BASE + \
+                                  OCP_SHARED_O_GPIO_PAD_CONFIG_0))
+#define OCP_SHARED_O_GPIO_PAD_CONFIG_0 \
+                                0x000000A0
+#define OCP_SHARED_BASE         0x4402E000
 void InitI2C0(void)
 {
 
@@ -79,10 +87,13 @@ void InitI2C0(void)
      I2CSlaveInit(I2CA0_BASE,MY_SLAVE_ADDR);
     // I2CSlaveAddressSet(I2CA0_BASE, 0, MY_SLAVE_ADDR);
      I2CSlaveIntClear(I2CA0_BASE);
+
      I2CSlaveIntEnable(I2CA0_BASE);
 
 }
-void I2CSend(uint8_t slave_addr, uint8_t num_of_args){
+
+void I2CSend(uint8_t slave_addr, uint8_t num_of_args)
+{
     uint8_t i;
     // Tell the master module what address it will place on the bus when
     // communicating with the slave.
@@ -96,39 +107,44 @@ void I2CSend(uint8_t slave_addr, uint8_t num_of_args){
     I2CMasterDataPut(I2CA0_BASE, va_arg(vargs, uint32_t));
 
     //if there is only one argument, we only need to use the single send I2C function
-    if(num_of_args == 1)
+    if (num_of_args == 1)
     {
         //Initiate send of data from the MCU
         I2CMasterControl(I2CA0_BASE, I2C_MASTER_CMD_SINGLE_SEND);
         // Wait until MCU is done transferring.
-        while(I2CMasterBusy(I2CA0_BASE));
+        while (I2CMasterBusy(I2CA0_BASE))
+            ;
         //"close" variable argument list
         va_end(vargs);
     }
 
     //otherwise, we start transmission of multiple bytes on the I2C bus
-    else{
+    else
+    {
         //Initiate send of data from the MCU
         I2CMasterControl(I2CA0_BASE, I2C_MASTER_CMD_BURST_SEND_START);
         // Wait until MCU is done transferring.
-        while(I2CMasterBusy(I2CA0_BASE));
+        while (I2CMasterBusy(I2CA0_BASE))
+            ;
         //send num_of_args-2 pieces of data, using the
         //BURST_SEND_CONT command of the I2C module
-        for(i = 1; i < (num_of_args - 1); i++)
+        for (i = 1; i < (num_of_args - 1); i++)
         {
             //put next piece of data into I2C FIFO
             I2CMasterDataPut(I2CA0_BASE, va_arg(vargs, uint32_t));
             //send next data that was just placed into FIFO
             I2CMasterControl(I2CA0_BASE, I2C_MASTER_CMD_BURST_SEND_CONT);
             // Wait until MCU is done transferring.
-            while (I2CMasterBusy(I2CA0_BASE));
+            while (I2CMasterBusy(I2CA0_BASE))
+                ;
         }
         //put last piece of data into I2C FIFO
         I2CMasterDataPut(I2CA0_BASE, va_arg(vargs, uint32_t));
         //send next data that was just placed into FIFO
         I2CMasterControl(I2CA0_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
         // Wait until MCU is done transferring.
-        while(I2CMasterBusy(I2CA0_BASE));
+        while (I2CMasterBusy(I2CA0_BASE))
+            ;
         //"close" variable args list
         va_end(vargs);
     }
@@ -142,7 +158,8 @@ void I2CSend(uint8_t slave_addr, uint8_t num_of_args){
     I2CMasterControl(I2CA0_BASE, I2C_MASTER_CMD_BURST_RECEIVE_FINISH);
 
     //wait for MCU & device to complete transaction
-    while(I2CMasterBusy(I2CA0_BASE));
+    while (I2CMasterBusy(I2CA0_BASE))
+        ;
 }
 uint8_t readI2C0(uint16_t device_address, uint16_t device_register)
 {
@@ -156,7 +173,8 @@ uint8_t readI2C0(uint16_t device_address, uint16_t device_register)
     I2CMasterControl(I2CA0_BASE, I2C_MASTER_CMD_SINGLE_SEND);
 
     //wait for MCU to complete send transaction
-    while(I2CMasterBusy(I2CA0_BASE));
+    while (I2CMasterBusy(I2CA0_BASE))
+        ;
 
     //read from the specified slave device
     I2CMasterSlaveAddrSet(I2CA0_BASE, device_address, true);
@@ -165,23 +183,80 @@ uint8_t readI2C0(uint16_t device_address, uint16_t device_register)
     I2CMasterControl(I2CA0_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
 
     //wait while checking for MCU to complete the transaction
-    while(I2CMasterBusy(I2CA0_BASE));
+    while (I2CMasterBusy(I2CA0_BASE))
+        ;
 
     //Get the data from the MCU register and return to caller
-    return( I2CMasterDataGet(I2CA0_BASE));
+    return (I2CMasterDataGet(I2CA0_BASE));
+}
+
+void closeI2C0()
+{
+//    uintptr_t                 key;
+//    I2CCC32XX_Object          *object = handle->object;
+//    I2CCC32XX_HWAttrsV1 const *hwAttrs = handle->hwAttrs;
+//    uint32_t                  padRegister;
+//
+//    /* Check to see if a I2C transaction is in progress */
+//    DebugP_assert(object->headPtr == NULL);
+
+    /* Mask I2C interrupts */
+    I2CMasterIntDisable(I2CA0_BASE);
+    //MAP_I2CMasterIntDisable(hwAttrs->baseAddr);
+
+    /* Disable the I2C Master */
+    I2CMasterDisable(I2CA0_BASE);
+    //MAP_I2CMasterDisable(hwAttrs->baseAddr);
+
+    /* Disable I2C module clocks */
+    Power_releaseDependency(PowerCC32XX_PERIPH_I2CA0);
+
+   // Power_unregisterNotify(&(object->notifyObj));
+
+    /* Restore pin pads to their reset states */
+    uint32_t padRegister = (PinToPadGet(I2CCC32XX_PIN_03_I2C_SCL & 0xff)<<2) + PAD_CONFIG_BASE;
+   // HWREG(padRegister) = PAD_DEFAULT_STATE;
+    padRegister = (PinToPadGet(I2CCC32XX_PIN_04_I2C_SDA & 0xff)<<2) + PAD_CONFIG_BASE;
+    //HWREG(padRegister) = PAD_DEFAULT_STATE;
+
+//    if (object->hwiHandle) {
+//        HwiP_delete(object->hwiHandle);
+//    }
+//    if (object->mutex) {
+//        SemaphoreP_delete(object->mutex);
+//    }
+//    /* Destruct the Semaphore */
+//    if (object->transferComplete) {
+//        SemaphoreP_delete(object->transferComplete);
+//    }
+//
+//    /* Mark the module as available */
+//    key = HwiP_disable();
+//
+//    object->isOpen = false;
+//    powerConstraint = false;
+//
+//    HwiP_restore(key);
+
+    DebugP_log1("I2C: Object closed 0x%x",I2CA0_BASE );
+
+    return;
 }
 /*/
  * the slave rec function to send the ACK states
  */
-void I2CSlaveRec(void){
-    uint32_t slaveStatus =I2CSlaveStatus(I2CA0_BASE);
+void I2CSlaveReceive(void){
 
-    if( slaveStatus == I2C_SLAVE_ACT_RREQ)
-    {
-        I2CSlaveACKOverride(I2CA0_BASE,true);
-        I2CSlaveACKValueSet(I2CA0_BASE, true);
-        Display_printf(display, 0, 0, "ACK SENT\n");
 
+    while(1){
+
+        uint32_t slaveRxdata = I2CSlaveDataGet(I2CA0_BASE);
+        Display_printf(display, 0, 0, "slaveData : %x", slaveRxdata);
+        uint32_t slaveStatus =I2CSlaveStatus(I2CA0_BASE);
+       // usleep(10000);
+        //Display_printf(display, 0, 0, "slaveStatus : %x", slaveStatus);
+
+       // Display_printf(display, 0, 0, "Starting the i2ctmp006 example\n");
     }
 
 }
@@ -190,78 +265,62 @@ void I2CSlaveRec(void){
  */
 void *mainThread(void *arg0)
 {
+    unsigned int i;
+    // uint16_t        temperature;
+    uint8_t txBuffer[1];
+    uint8_t rxBuffer[2];
+    //I2C_Handle      i2c;
+    //I2C_Params      i2cParams;
+    //I2C_Transaction i2cTransaction;
+
     /* Call driver init functions */
     Display_init();
     GPIO_init();
     InitI2C0();
-    I2CSlaveRec();
-    //I2CSend(0x41,1);
+    //I2CSend(0x41, 1);
+
 
     /* Configure the LED pin */
-#if 0
     GPIO_setConfig(Board_GPIO_LED0, GPIO_CFG_OUT_STD | GPIO_CFG_OUT_LOW);
 
     /* Open the HOST display for output */
     display = Display_open(Display_Type_UART, NULL);
-    if (display == NULL) {
-        while (1);
+    if (display == NULL)
+    {
+        while (1)
+            ;
     }
 
     /* Turn on user LED */
     GPIO_write(Board_GPIO_LED0, Board_GPIO_LED_ON);
-    Display_printf(display, 0, 0, "Starting the i2ctmp006 example\n");
-    uint16_t        temperature=readI2C0(0x41, TMP006_DIE_TEMP);
-    Display_printf(display, 0, 0, "Sample %u: %d (C)\n", 0, temperature);
-
-#endif
+   // I2CSlaveReceive();
+   /// Display_printf(display, 0, 0, "Starting the i2ctmp006 example\n");
 
 #if 0
-    txBuffer[0] = TMP006_DIE_TEMP;
-    i2cTransaction.slaveAddress = Board_TMP_ADDR;
-    i2cTransaction.writeBuf = txBuffer;
-    i2cTransaction.writeCount = 1;
-    i2cTransaction.readBuf = rxBuffer;
-    i2cTransaction.readCount = 2;
+    for (i = 0; i < 5; i++)
+    {
+        uint16_t temperature_reg1 = readI2C0(Board_TMP_ADDR, TMP006_DIE_TEMP); //device addr and device reg
+        uint16_t temperature_reg2 = readI2C0(Board_TMP_ADDR, TMP006_DIE_TEMP_2); //device addr and device reg
+        uint16_t temperature = (temperature_reg1 << 6)
+                | (temperature_reg2 >> 2);
 
-#endif
-
-    /* Take 20 samples and print them out onto the console */
-#if 0
-    for (i = 0; i < 20; i++) {
-       // if (I2C_transfer(i2c, &i2cTransaction))
-
+        //handle negative temps
+        if (temperature_reg1 & 0x80)
         {
-            /* Extract degrees C from the received data; see TMP102 datasheet */
-            temperature = (rxBuffer[0] << 6) | (rxBuffer[1] >> 2);
-
-            /*
-             * If the MSB is set '1', then we have a 2's complement
-             * negative value which needs to be sign extended
-             */
-            if (rxBuffer[0] & 0x80) {
-                temperature |= 0xF000;
-            }
-           /*
-            * For simplicity, divide the temperature value by 32 to get rid of
-            * the decimal precision; see TI's TMP006 datasheet
-            */
-            temperature /= 32;
-
-            Display_printf(display, 0, 0, "Sample %u: %d (C)\n", i, temperature);
+            temperature |= 0xF000;
         }
-       // else
-        {
-            Display_printf(display, 0, 0, "I2C Bus fault\n");
-        }
-
-        /* Sleep for 1 second */
+        //get the final temp
+        temperature /= 32;
+        Display_printf(display, 0, 0, "Final temp sample %d: %d (C)\n", i,
+                       temperature);
         sleep(1);
     }
 #endif
 
     /* Deinitialized I2C */
-  //  I2C_close(i2c);
-    //Display_printf(display, 0, 0, "I2C closed!\n");
-
+   // closeI2C0();
+    while(1);
+    Display_printf(display, 0, 0, "I2C closed!\n");
     return (0);
 }
+#endif
