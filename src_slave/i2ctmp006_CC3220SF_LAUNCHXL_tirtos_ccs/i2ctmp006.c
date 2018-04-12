@@ -47,6 +47,7 @@
 //#include <ti/drivers/I2C.h>
 #include <ti/devices/cc32xx/driverlib/i2c.h>
 #include <ti/devices/cc32xx/inc/hw_memmap.h>
+#include <ti/devices/cc32xx/inc/hw_i2c.h>
 #include <ti/drivers/Power.h>
 #include <ti/drivers/dpl/ClockP.h>
 #include <ti/display/Display.h>
@@ -59,7 +60,7 @@
 #define I2CCC32XX_PIN_03_I2C_SCL  0x502 /*!< PIN 3 is used for I2C_SCL *///PIN 3 is used for I2C clock
 #define I2CCC32XX_PIN_04_I2C_SDA  0x503 /*!< PIN 4 is used for I2C_SDA *///pin 4 is used for i2c sda
 
-#define MY_SLAVE_ADDR 0x68
+#define MY_SLAVE_ADDR 0x58
 
 static Display_Handle display;
 
@@ -83,183 +84,43 @@ void InitI2C0(void)
      pin =   I2CCC32XX_PIN_04_I2C_SDA & 0xff;
      mode = (I2CCC32XX_PIN_04_I2C_SDA >> 8) & 0xff;
      PinTypeI2C((unsigned long)pin, (unsigned long)mode);
-
-     I2CSlaveInit(I2CA0_BASE,MY_SLAVE_ADDR);
+     uint32_t SCSRstatus;
+     Display_printf(display, 0, 0, "pre SCSRstatus : %x", SCSRstatus);
+     SCSRstatus=I2CSlaveInit(I2CA0_BASE,MY_SLAVE_ADDR);
+     Display_printf(display, 0, 0, "post SCSRstatus : %x", SCSRstatus);
+     sleep(1);
     // I2CSlaveAddressSet(I2CA0_BASE, 0, MY_SLAVE_ADDR);
      I2CSlaveIntClear(I2CA0_BASE);
 
      I2CSlaveIntEnable(I2CA0_BASE);
+     Display_printf(display, 0, 0, "intr SCSRstatus : %x", SCSRstatus);
 
 }
 
-void I2CSend(uint8_t slave_addr, uint8_t num_of_args)
-{
-    uint8_t i;
-    // Tell the master module what address it will place on the bus when
-    // communicating with the slave.
-    I2CMasterSlaveAddrSet(I2CA0_BASE, slave_addr, false);
-    //stores list of variable number of arguments
-    va_list vargs;
-    //specifies the va_list to "open" and the last fixed argument
-    //so vargs knows where to start looking
-    va_start(vargs, num_of_args);
-    //put data to be sent into FIFO
-    I2CMasterDataPut(I2CA0_BASE, va_arg(vargs, uint32_t));
 
-    //if there is only one argument, we only need to use the single send I2C function
-    if (num_of_args == 1)
-    {
-        //Initiate send of data from the MCU
-        I2CMasterControl(I2CA0_BASE, I2C_MASTER_CMD_SINGLE_SEND);
-        // Wait until MCU is done transferring.
-        while (I2CMasterBusy(I2CA0_BASE))
-            ;
-        //"close" variable argument list
-        va_end(vargs);
-    }
-
-    //otherwise, we start transmission of multiple bytes on the I2C bus
-    else
-    {
-        //Initiate send of data from the MCU
-        I2CMasterControl(I2CA0_BASE, I2C_MASTER_CMD_BURST_SEND_START);
-        // Wait until MCU is done transferring.
-        while (I2CMasterBusy(I2CA0_BASE))
-            ;
-        //send num_of_args-2 pieces of data, using the
-        //BURST_SEND_CONT command of the I2C module
-        for (i = 1; i < (num_of_args - 1); i++)
-        {
-            //put next piece of data into I2C FIFO
-            I2CMasterDataPut(I2CA0_BASE, va_arg(vargs, uint32_t));
-            //send next data that was just placed into FIFO
-            I2CMasterControl(I2CA0_BASE, I2C_MASTER_CMD_BURST_SEND_CONT);
-            // Wait until MCU is done transferring.
-            while (I2CMasterBusy(I2CA0_BASE))
-                ;
-        }
-        //put last piece of data into I2C FIFO
-        I2CMasterDataPut(I2CA0_BASE, va_arg(vargs, uint32_t));
-        //send next data that was just placed into FIFO
-        I2CMasterControl(I2CA0_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
-        // Wait until MCU is done transferring.
-        while (I2CMasterBusy(I2CA0_BASE))
-            ;
-        //"close" variable args list
-        va_end(vargs);
-    }
-
-    I2CMasterSlaveAddrSet(I2CA0_BASE, slave_addr, true);
-
-    //specify data to be written to the above mentioned device_register
-    I2CMasterDataPut(I2CA0_BASE, va_arg(vargs, uint32_t));
-
-    //wait while checking for MCU to complete the transaction
-    I2CMasterControl(I2CA0_BASE, I2C_MASTER_CMD_BURST_RECEIVE_FINISH);
-
-    //wait for MCU & device to complete transaction
-    while (I2CMasterBusy(I2CA0_BASE))
-        ;
-}
-uint8_t readI2C0(uint16_t device_address, uint16_t device_register)
-{
-    //specify that we want to communicate to device address with an intended write to bus
-    I2CMasterSlaveAddrSet(I2CA0_BASE, device_address, false);
-
-    //the register to be read
-    I2CMasterDataPut(I2CA0_BASE, device_register);
-
-    //send control byte and register address byte to slave device
-    I2CMasterControl(I2CA0_BASE, I2C_MASTER_CMD_SINGLE_SEND);
-
-    //wait for MCU to complete send transaction
-    while (I2CMasterBusy(I2CA0_BASE))
-        ;
-
-    //read from the specified slave device
-    I2CMasterSlaveAddrSet(I2CA0_BASE, device_address, true);
-
-    //send control byte and read from the register from the MCU
-    I2CMasterControl(I2CA0_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
-
-    //wait while checking for MCU to complete the transaction
-    while (I2CMasterBusy(I2CA0_BASE))
-        ;
-
-    //Get the data from the MCU register and return to caller
-    return (I2CMasterDataGet(I2CA0_BASE));
-}
-
-void closeI2C0()
-{
-//    uintptr_t                 key;
-//    I2CCC32XX_Object          *object = handle->object;
-//    I2CCC32XX_HWAttrsV1 const *hwAttrs = handle->hwAttrs;
-//    uint32_t                  padRegister;
-//
-//    /* Check to see if a I2C transaction is in progress */
-//    DebugP_assert(object->headPtr == NULL);
-
-    /* Mask I2C interrupts */
-    I2CMasterIntDisable(I2CA0_BASE);
-    //MAP_I2CMasterIntDisable(hwAttrs->baseAddr);
-
-    /* Disable the I2C Master */
-    I2CMasterDisable(I2CA0_BASE);
-    //MAP_I2CMasterDisable(hwAttrs->baseAddr);
-
-    /* Disable I2C module clocks */
-    Power_releaseDependency(PowerCC32XX_PERIPH_I2CA0);
-
-   // Power_unregisterNotify(&(object->notifyObj));
-
-    /* Restore pin pads to their reset states */
-    uint32_t padRegister = (PinToPadGet(I2CCC32XX_PIN_03_I2C_SCL & 0xff)<<2) + PAD_CONFIG_BASE;
-   // HWREG(padRegister) = PAD_DEFAULT_STATE;
-    padRegister = (PinToPadGet(I2CCC32XX_PIN_04_I2C_SDA & 0xff)<<2) + PAD_CONFIG_BASE;
-    //HWREG(padRegister) = PAD_DEFAULT_STATE;
-
-//    if (object->hwiHandle) {
-//        HwiP_delete(object->hwiHandle);
-//    }
-//    if (object->mutex) {
-//        SemaphoreP_delete(object->mutex);
-//    }
-//    /* Destruct the Semaphore */
-//    if (object->transferComplete) {
-//        SemaphoreP_delete(object->transferComplete);
-//    }
-//
-//    /* Mark the module as available */
-//    key = HwiP_disable();
-//
-//    object->isOpen = false;
-//    powerConstraint = false;
-//
-//    HwiP_restore(key);
-
-    DebugP_log1("I2C: Object closed 0x%x",I2CA0_BASE );
-
-    return;
-}
 /*/
  * the slave rec function to send the ACK states
  */
 void I2CSlaveReceive(void){
-
+    uint32_t dataRead;
+    uint32_t status;
 
     while(1){
+        status =HWREG(I2CA0_BASE + I2C_O_SCSR) ;
 
-        uint32_t slaveRxdata = I2CSlaveDataGet(I2CA0_BASE);
-        Display_printf(display, 0, 0, "slaveData : %x", slaveRxdata);
-        uint32_t slaveStatus =I2CSlaveStatus(I2CA0_BASE);
-       // usleep(10000);
-        //Display_printf(display, 0, 0, "slaveStatus : %x", slaveStatus);
-
-       // Display_printf(display, 0, 0, "Starting the i2ctmp006 example\n");
+        if(status & 0x01)//master write and slave reads
+            {
+            //readfrom sdr
+            dataRead =I2CSlaveDataGet(I2CA0_BASE);
+            Display_printf(display, 0, 0, "pre SCSRstatus : %x", dataRead);
+        }
+         else if(status & 0x02) //master read and slave writes
+             //write to sdr
+             I2CSlaveDataPut(I2CA0_BASE,0x5);
     }
 
 }
+
 /*
  *  ======== mainThread ========
  */
@@ -293,7 +154,7 @@ void *mainThread(void *arg0)
 
     /* Turn on user LED */
     GPIO_write(Board_GPIO_LED0, Board_GPIO_LED_ON);
-   // I2CSlaveReceive();
+    I2CSlaveReceive();
    /// Display_printf(display, 0, 0, "Starting the i2ctmp006 example\n");
 
 #if 0
@@ -319,7 +180,7 @@ void *mainThread(void *arg0)
 
     /* Deinitialized I2C */
    // closeI2C0();
-    while(1);
+
     Display_printf(display, 0, 0, "I2C closed!\n");
     return (0);
 }
